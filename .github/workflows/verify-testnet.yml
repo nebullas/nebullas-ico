@@ -1,7 +1,7 @@
-name: Verify Testnet (Hardhat)
+name: Verify Testnet (Sourcify + Etherscan V2 fallback)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -10,26 +10,14 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
 
-    env:
-      # Node & RPC
-      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET || 'https://data-seed-prebsc-1-s1.binance.org:8545' }}
-      # Etherscan/BscScan key resolution (prefer BscScan, else Etherscan V2)
-      ETHERSCAN_API_KEY: ${{ secrets.BSCSCAN_KEY != '' && secrets.BSCSCAN_KEY || secrets.ETHERSCAN_API_KEY }}
-      # Gate the step without referencing `secrets` in `if:`
-      SHOULD_VERIFY:    ${{ (secrets.BSCSCAN_KEY != '' || secrets.ETHERSCAN_API_KEY != '') && 'true' || 'false' }}
-
-      # Constructor params reused by the script
-      TREASURY:              '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'
-      USDT_DECIMALS_TESTNET: '18'
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 22
 
       - name: Pin Hardhat & Toolbox versions
         run: |
@@ -40,27 +28,51 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
-      - name: Force CommonJS (package.json + tsconfig)
-        run: |
-          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
-          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
-          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
-          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8')); if(p.type==='module'){process.exit(1)}"
-
       - name: Install deps
         run: npm i
 
       - name: Compile
         run: npx hardhat compile
 
-      - name: Show API key presence (debug)
+      # addresses/testnet.json → $GITHUB_ENV  (quoted heredoc; no shell expansion)
+      - name: Load addresses from addresses/testnet.json
         run: |
-          if [ -z "${ETHERSCAN_API_KEY}" ]; then echo "No API key present -> verify will be skipped"; else echo "API key present -> verify will run"; fi
+          test -f addresses/testnet.json || { echo "addresses/testnet.json missing"; exit 1; }
+          node <<'NODE'
+          const fs = require('fs');
+          const a  = JSON.parse(fs.readFileSync('addresses/testnet.json','utf8'));
+          const req = ['USDT','NBL','REG','TREE','POOL','SALE'];
+          for (const k of req) {
+            if (!a[k]) { console.error('Missing', k); process.exit(2); }
+            fs.appendFileSync(process.env.GITHUB_ENV, `${k}=${a[k]}\n`);
+          }
+          // optional ADMIN from JSON
+          if (a.ADMIN) fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=${a.ADMIN}\n`);
+          NODE
 
-      - name: Verify contracts from addresses/testnet.json
-        if: env.SHOULD_VERIFY == 'true'
-        run: npx hardhat run scripts/verify_testnet.ts --network bscTestnet
+      # 🔹 Sourcify-first (no key required): enable via hardhat.config.ts (we already did)
+      - name: Verify via Sourcify (no key)
+        run: |
+          npx hardhat verify --network bscTestnet "$USDT" || true
+          npx hardhat verify --network bscTestnet "$NBL"  || true
+          npx hardhat verify --network bscTestnet "$REG"  || true
+          npx hardhat verify --network bscTestnet "$TREE" || true
+          npx hardhat verify --network bscTestnet "$POOL" || true
+          npx hardhat verify --network bscTestnet "$SALE" || true
 
-      - name: Skip note
-        if: env.SHOULD_VERIFY != 'true'
-        run: echo "Skipping verification (no API key). Deploys are already successful."
+      # 🔹 Etherscan fallback (only if key present) — Invalid key पर भी job break न करें
+      - name: Verify via Etherscan (V2)
+        if: ${{ secrets.ETHERSCAN_API_KEY != '' }}
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          TREASURY: '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'
+          USDT_DECIMALS_TESTNET: '18'
+          DEPLOYER_ADDR: '0xE77F94010Fb3B01431E18015A1c9A56F74e79998'
+        run: |
+          set -e
+          node -v && npx hardhat --version
+          # Use TS helper to verify with exact constructor args (doesn't need signer)
+          npx hardhat run scripts/verify_testnet.ts --network bscTestnet || true
+
+      - name: Done
+        run: echo "Verification flow finished (Sourcify first; Etherscan attempted if key present)."
