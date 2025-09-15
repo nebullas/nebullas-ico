@@ -1,7 +1,7 @@
 name: Deploy Testnet (Hardhat)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,12 +28,6 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
-      - name: Force CommonJS (package.json + tsconfig)
-        run: |
-          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
-          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
-          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
-
       - name: Install deps
         run: npm i
 
@@ -43,10 +37,10 @@ jobs:
       - name: Deploy to BSC Testnet
         env:
           DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
-          RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET || 'https://data-seed-prebsc-1-s1.binance.org:8545' }}
-          TREASURY: ${{ vars.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420' }}
-          GUARDIAN: ${{ vars.GUARDIAN || '0xE77F94010Fb3B01431E18015A1c9A56F74e79998' }}
-          USDT_ADDRESS_TESTNET: ${{ vars.USDT_ADDRESS_TESTNET || '' }}
-          USDT_DECIMALS_TESTNET: ${{ vars.USDT_DECIMALS_TESTNET || '18' }}
-          PERMIT2: ${{ vars.PERMIT2 || '0x0000000000000000000000000000000000000000' }}
+          RPC_BSC_TESTNET: ${{ vars.RPC_BSC_TESTNET }}
+          TREASURY: ${{ vars.TREASURY }}
+          GUARDIAN: ${{ vars.GUARDIAN }}
+          USDT_ADDRESS_TESTNET: ${{ vars.USDT_ADDRESS_TESTNET }}
+          USDT_DECIMALS_TESTNET: ${{ vars.USDT_DECIMALS_TESTNET }}
+          PERMIT2: ${{ vars.PERMIT2 }}
         run: npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
