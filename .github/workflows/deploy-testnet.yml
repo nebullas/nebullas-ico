@@ -10,14 +10,25 @@ jobs:
   deploy:
     runs-on: ubuntu-24.04
 
+    env:
+      # Chain + keys
+      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET || 'https://data-seed-prebsc-1-s1.binance.org:8545' }}
+      DEPLOYER_KEY:     ${{ secrets.DEPLOYER_KEY }}
+
+      # Project addresses (plain strings; NO expressions here)
+      TREASURY:               '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'
+      GUARDIAN:               '0xE77F94010Fb3B01431E18015A1c9A56F74e79998'
+      USDT_ADDRESS_TESTNET:   ''        # keep empty to auto-deploy MockUSDT
+      USDT_DECIMALS_TESTNET:  '18'      # BSC testnet mock uses 18
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 22
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
       - name: Pin Hardhat & Toolbox versions
         run: |
@@ -28,19 +39,18 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
+      - name: Force CommonJS (package.json + tsconfig)
+        run: |
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
+          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8')); if(p.type==='module'){process.exit(1)}"
+
       - name: Install deps
         run: npm i
 
       - name: Compile
-        run: npx hardhat clean && npx hardhat compile
+        run: npx hardhat compile
 
       - name: Deploy to BSC Testnet
-        env:
-          DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
-          RPC_BSC_TESTNET: ${{ vars.RPC_BSC_TESTNET }}
-          TREASURY: ${{ vars.TREASURY }}
-          GUARDIAN: ${{ vars.GUARDIAN }}
-          USDT_ADDRESS_TESTNET: ${{ vars.USDT_ADDRESS_TESTNET }}
-          USDT_DECIMALS_TESTNET: ${{ vars.USDT_DECIMALS_TESTNET }}
-          PERMIT2: ${{ vars.PERMIT2 }}
         run: npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
