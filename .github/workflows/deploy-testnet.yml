@@ -9,36 +9,29 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-
     env:
-      # Chain + keys
-      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET || 'https://data-seed-prebsc-1-s1.binance.org:8545' }}
-      DEPLOYER_KEY:     ${{ secrets.DEPLOYER_KEY }}
-
-      # Project addresses (plain strings; NO expressions here)
-      TREASURY:               '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'
-      GUARDIAN:               '0xE77F94010Fb3B01431E18015A1c9A56F74e79998'
-      USDT_ADDRESS_TESTNET:   ''        # keep empty to auto-deploy MockUSDT
-      USDT_DECIMALS_TESTNET:  '18'      # BSC testnet mock uses 18
+      NODE_VERSION: 22
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
 
+      # Hardhat/Toolbox versions पिन — peer-conflicts से बचने के लिए (लॉग में दिखा था) 
       - name: Pin Hardhat & Toolbox versions
         run: |
-          npm pkg set devDependencies.hardhat=2.26.3
-          npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
-          npm pkg set devDependencies.typescript=5.4.5
-          npm pkg set devDependencies.ts-node=10.9.1
-          npm pkg set devDependencies["@types/node"]=20.11.30
-          npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
+          npm pkg set "devDependencies.hardhat=2.26.3"
+          npm pkg set "devDependencies.@nomicfoundation/hardhat-toolbox=6.1.0"
+          npm pkg set "devDependencies.typescript=5.4.5"
+          npm pkg set "devDependencies.ts-node=10.9.1"
+          npm pkg set "devDependencies.@types/node=20.11.30"
+          npm pkg set "dependencies.@openzeppelin/contracts=5.0.2"
 
+      # प्रोजेक्ट को CommonJS मोड में फोर्स करें (पहले ESM/TS के कारण HH19 errors आए थे)
       - name: Force CommonJS (package.json + tsconfig)
         run: |
           node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
@@ -50,7 +43,34 @@ jobs:
         run: npm i
 
       - name: Compile
-        run: npx hardhat compile
+        run: npx hardhat clean && npx hardhat compile
+
+      # ✅ YAML expressions में secrets/vars direct ना रखें — पहले यहीं error थे।
+      - name: Resolve env (Treasury/Guardian/USDT/RPC/Key)
+        env:
+          TREASURY_IN: ${{ vars.TREASURY }}
+          GUARDIAN_IN: ${{ vars.GUARDIAN }}
+          USDT_IN: ${{ vars.USDT_ADDRESS_TESTNET }}
+          RPC_IN: ${{ secrets.RPC_BSC_TESTNET }}
+          DEPLOYER_KEY_IN: ${{ secrets.DEPLOYER_KEY }}
+        run: |
+          echo "TREASURY=${TREASURY_IN:-0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420}" >> $GITHUB_ENV
+          echo "GUARDIAN=${GUARDIAN_IN:-0xE77F94010Fb3B01431E18015A1c9A56F74e79998}" >> $GITHUB_ENV
+          echo "USDT_ADDRESS_TESTNET=${USDT_IN:-}" >> $GITHUB_ENV
+          echo "RPC_BSC_TESTNET=${RPC_IN:-https://bsc-testnet.publicnode.com}" >> $GITHUB_ENV
+          echo "DEPLOYER_KEY=${DEPLOYER_KEY_IN}" >> $GITHUB_ENV
+
+      - name: Write .env for Hardhat
+        run: |
+          cat > .env <<'EOF'
+          DEPLOYER_KEY=${DEPLOYER_KEY}
+          RPC_BSC_TESTNET=${RPC_BSC_TESTNET}
+          TREASURY=${TREASURY}
+          GUARDIAN=${GUARDIAN}
+          USDT_ADDRESS_TESTNET=${USDT_ADDRESS_TESTNET}
+          USDT_DECIMALS_TESTNET=18
+          PERMIT2=
+          EOF
 
       - name: Deploy to BSC Testnet
         run: npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
