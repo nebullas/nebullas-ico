@@ -1,74 +1,95 @@
-name: Verify Testnet (Sourcify + Etherscan)
+name: Verify Testnet (Etherscan)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    env:
+      # RPC (testnet) और Etherscan key Actions Secrets में रखें
+      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
+      ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+
+      # Fallbacks (bash में override कर देंगे अगर Org/Repo VAR दिए हों)
+      TREASURY_FALLBACK: "0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420"
+      ADMIN_FALLBACK:    "0xE77F94010Fb3B01431E18015A1c9A56F74e79998"
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # deps (पिन्ड वर्ज़न्स ताकि टूटे नहीं)
-      - run: |
-          npm pkg set devDependencies.hardhat=2.26.3
-          npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
-          npm pkg set devDependencies.typescript=5.4.5
-          npm pkg set devDependencies.ts-node=10.9.1
-          npm pkg set devDependencies["@types/node"]=20.11.30
-          npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
-          npm i
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-      - name: Compile
-        run: npx hardhat compile
+      - name: Install deps
+        run: npm ci || npm i
 
-      # --- Sourcify (API‑less) ---
-      - name: Verify via Sourcify (multi-chain)
-        env:
-          RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
+      - name: Read deployed addresses
         run: |
-          node - <<'NODE'
-          const fs=require('fs'), cp=require('child_process');
-          const a=JSON.parse(fs.readFileSync('addresses/testnet.json','utf8'));
-          const list=[["NBLToken",a.NBL],["PartnerRegistry",a.REG],["PartnerTree",a.TREE],["PoolVault",a.POOL],["NBLSaleV5",a.SALE]];
-          for(const [name,addr] of list){
-            // sourcify-cli नहीं, हार्डहैट आर्टिफैक्ट + sourcify API auto-upload (toolbox support)
-            // Hardhat toolbox 6.1 में sourcify टास्क नहीं है; इसलिए metadata/artifacts out-of-box publish:
-            // न चलने पर भी स्टेप soft-fail न करें:
-            try { cp.execSync(`npx hardhat verify --network bscTestnet ${addr}`, {stdio:'inherit'}); } catch(e){ console.log("sourcify/etherscan fallback path will try below or skip."); }
-          }
-          NODE
+          test -f addresses/testnet.json && cat addresses/testnet.json || true
+          echo "SALE=$(jq -r .SALE addresses/testnet.json)"  >> $GITHUB_ENV
+          echo "NBL=$(jq -r .NBL addresses/testnet.json)"    >> $GITHUB_ENV
+          echo "USDT=$(jq -r .USDT addresses/testnet.json)"  >> $GITHUB_ENV
+          echo "REG=$(jq -r .REG addresses/testnet.json)"    >> $GITHUB_ENV
+          echo "TREE=$(jq -r .TREE addresses/testnet.json)"  >> $GITHUB_ENV
+          echo "POOL=$(jq -r .POOL addresses/testnet.json)"  >> $GITHUB_ENV
 
-      # --- Etherscan (optional) ---
       - name: Verify via Etherscan (only if key present)
-        env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        shell: bash
         run: |
-          if [ -n "${ETHERSCAN_API_KEY}" ]; then
-            echo "Etherscan key present: running verifies…"
-            node - <<'NODE'
-            const fs=require('fs'), {execSync}=require('child_process');
-            const a=JSON.parse(fs.readFileSync('addresses/testnet.json','utf8'));
-            // Constructor args reconstruction (mirror of scripts/deploy_testnet.ts)
-            const cap = (10n**18n) * 10000000000n;
-            const bonus = cap/10n;
-
-            const cmds = [
-              // NBLToken(admin, cap, bonus)
-              `npx hardhat verify --network bscTestnet ${a.NBL} ${a.Deployer} ${cap.toString()} ${bonus.toString()}`,
-              // PartnerRegistry(admin)
-              `npx hardhat verify --network bscTestnet ${a.REG} ${a.Deployer}`,
-              // PartnerTree(admin)
-              `npx hardhat verify --network bscTestnet ${a.TREE} ${a.Deployer}`,
-              // PoolVault(admin, usdt)
-              `npx hardhat verify --network bscTestnet ${a.POOL} ${a.Deployer} ${a.USDT}`,
-              // NBLSaleV5(admin,nbl,usdt,reg,tree,pool,treasury,usdtDec,mode,min,max,permit2)
-              `npx hardhat verify --network bscTestnet ${a.SALE} ${a.Deployer} ${a.NBL} ${a.USDT} ${a.REG} ${a.TREE} ${a.POOL} ${a.TREASURY} 18 0 ${a.MinUSDT} ${a.MaxUSDT} 0x0000000000000000000000000000000000000000`
-            ];
-            for(const c of cmds){ try { console.log(">",c); execSync(c,{stdio:'inherit'});} catch(e){ console.log("verify failed (non-blocking):",c); } }
-            NODE
-          else
-            echo "No ETHERSCAN_API_KEY → skipping Etherscan verifies."
+          if [ -z "${ETHERSCAN_API_KEY}" ]; then
+            echo "ETHERSCAN_API_KEY not set → skipping Etherscan verification."; exit 0;
           fi
+
+          # Org/Repo variables (optional); खाली हों तो fallback लगाओ
+          TREASURY="${{ vars.TREASURY }}"
+          [ -z "$TREASURY" ] && TREASURY="${TREASURY_FALLBACK}"
+
+          ADMIN="${{ vars.DEPLOYER_ADDRESS }}"
+          [ -z "$ADMIN" ] && ADMIN="${ADMIN_FALLBACK}"
+
+          # Hard defaults matching deploy script
+          USDT_DEC=18
+          MIN_WEI="50000000000000000000"         # 50 * 1e18
+          MAX_WEI="10000000000000000000000"      # 10000 * 1e18
+          PERMIT2="0x0000000000000000000000000000000000000000"
+
+          echo "Using:"
+          echo "  SALE=$SALE"
+          echo "  NBL=$NBL"
+          echo "  USDT=$USDT"
+          echo "  REG=$REG"
+          echo "  TREE=$TREE"
+          echo "  POOL=$POOL"
+          echo "  TREASURY=$TREASURY"
+          echo "  ADMIN=$ADMIN"
+
+          # Constructor args for NBLSaleV5
+          cat > args-sale.js <<EOF
+module.exports = [
+  "${ADMIN}",
+  "${NBL}",
+  "${USDT}",
+  "${REG}",
+  "${TREE}",
+  "${POOL}",
+  "${TREASURY}",
+  ${USDT_DEC},
+  0,
+  "${MIN_WEI}",
+  "${MAX_WEI}",
+  "${PERMIT2}"
+];
+EOF
+
+          echo "=== args-sale.js ==="; cat args-sale.js
+
+          # Best-effort verify (फेल हो तो pipeline न तोड़े)
+          npx hardhat verify --network bscTestnet --constructor-args args-sale.js ${SALE} \
+          || echo "Etherscan verification failed (likely API/key mismatch). Skipping as non-fatal."
