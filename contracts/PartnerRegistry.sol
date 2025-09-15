@@ -12,7 +12,14 @@ contract PartnerRegistry is AccessControl {
     function setKYC(address u,bool ok) external onlyRole(ADMIN_ROLE){ kycPassed[u]=ok; emit KYCUpdated(u,ok); _flip(u); }
     function notePurchase(address u,uint256 nbl) external onlyRole(ADMIN_ROLE){ cumulativePurchasedNBL[u]+=nbl; _flip(u); }
     function _flip(address u) internal { if(stateOf[u]==State.NOT_ELIGIBLE && kycPassed[u] && cumulativePurchasedNBL[u]>=10 ether){ stateOf[u]=State.ELIGIBLE; emit StateChanged(u,State.NOT_ELIGIBLE,State.ELIGIBLE);} }
-    function apply() external { require(kycPassed[msg.sender],"KYC"); State s=stateOf[msg.sender]; require(s==State.ELIGIBLE||s==State.REJECTED,"not eligible"); stateOf[msg.sender]=State.PENDING; emit StateChanged(msg.sender,s,State.PENDING); }
+    function applyAsPartner() external {
+    require(kycPassed[msg.sender], "KYC");
+    State s = stateOf[msg.sender];
+    require(s == State.ELIGIBLE || s == State.REJECTED, "not eligible");
+    stateOf[msg.sender] = State.PENDING;
+    emit StateChanged(msg.sender, s, State.PENDING);
+}
+
     function approve(address u,bool ok) external onlyRole(ADMIN_ROLE){ State p=stateOf[u]; stateOf[u]= ok? State.APPROVED:State.REJECTED; emit StateChanged(u,p,stateOf[u]); }
     function suspend(address u,bool s) external onlyRole(ADMIN_ROLE){ State p=stateOf[u]; stateOf[u]= s? State.SUSPENDED:State.APPROVED; emit StateChanged(u,p,stateOf[u]); }
 }
