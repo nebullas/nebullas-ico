@@ -1,7 +1,7 @@
 name: Verify Testnet (BscScan)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -9,8 +9,6 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    # पहले जो error था: if में ${{ }} गायब था → अब ठीक
-    if: ${{ secrets.ETHERSCAN_API_KEY != '' || secrets.BSCSCAN_KEY != '' }}
 
     steps:
       - name: Checkout
@@ -42,23 +40,30 @@ jobs:
       - name: Compile
         run: npx hardhat compile
 
+      # addresses/testnet.json → $GITHUB_ENV (jq-free, pure Node)
       - name: Load addresses from addresses/testnet.json
         run: |
-          test -f addresses/testnet.json || { echo "addresses/testnet.json missing"; exit 1; }
-          echo "USDT=$(jq -r '.USDT' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "NBL=$(jq -r '.NBL' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "REG=$(jq -r '.REG' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "TREE=$(jq -r '.TREE' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "POOL=$(jq -r '.POOL' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "SALE=$(jq -r '.SALE' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998" >> $GITHUB_ENV
-          echo "TREASURY=${{ vars.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420' }}" >> $GITHUB_ENV
-          echo "PERMIT2=${{ vars.PERMIT2 || '0x0000000000000000000000000000000000000000' }}" >> $GITHUB_ENV
+          node -e "const fs=require('fs'),p='addresses/testnet.json';
+          if(!fs.existsSync(p)) { console.error('addresses/testnet.json missing'); process.exit(1); }
+          const a=JSON.parse(fs.readFileSync(p,'utf8'));
+          const need=['USDT','NBL','REG','TREE','POOL','SALE'];
+          for(const k of need){ if(!a[k]){ console.error('Missing',k); process.exit(2);} 
+            fs.appendFileSync(process.env.GITHUB_ENV, `${k}=${a[k]}\n`);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `TREASURY=${process.env.TREASURY||'0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `PERMIT2=${process.env.PERMIT2||'0x0000000000000000000000000000000000000000'}\n`);
+          console.log('Loaded addresses:', need.map(k=>a[k]).join(', '));"
 
-      - name: Verify on BSC Testnet
+      # map secrets → env, फिर step-level if में env यूज़ करें (job-level पर secrets disallowed)
+      - name: Verify on BSC Testnet (Etherscan V2 or BscScan)
         env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY || secrets.BSCSCAN_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          BSCSCAN_KEY:       ${{ secrets.BSCSCAN_KEY }}
+        if: ${{ env.ETHERSCAN_API_KEY != '' || env.BSCSCAN_KEY != '' }}
         run: |
+          export ETHERSCAN_API_KEY="${ETHERSCAN_API_KEY:-$BSCSCAN_KEY}"
+          echo "Using explorer API key (masked)."
           # NBLToken(admin, cap, bonusCap)
           npx hardhat verify --network bscTestnet "$NBL" \
             "$ADMIN" \
@@ -75,9 +80,13 @@ jobs:
           npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT"
 
           # NBLSaleV5(admin, nbl, usdt, reg, tree, pool, treasury, usdtDecimals, mode, min, max, permit2)
-          # mode=0 (INSTANT), min=50e18, max=10000e18  — BSC testnet USDT decimals=18
+          # mode=0, min=50e18, max=10000e18, usdtDecimals=18 (BSC testnet)
           npx hardhat verify --network bscTestnet "$SALE" \
             "$ADMIN" "$NBL" "$USDT" "$REG" "$TREE" "$POOL" \
             "$TREASURY" "18" "0" \
             "50000000000000000000" "10000000000000000000000" \
             "$PERMIT2"
+
+      - name: Skip note (no API key)
+        if: ${{ !(env.ETHERSCAN_API_KEY != '' || env.BSCSCAN_KEY != '') }}
+        run: echo "No explorer key in secrets; verify step skipped."
