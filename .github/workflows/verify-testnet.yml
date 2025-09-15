@@ -43,19 +43,28 @@ jobs:
       # addresses/testnet.json → $GITHUB_ENV (jq-free, pure Node)
       - name: Load addresses from addresses/testnet.json
         run: |
-          node -e "const fs=require('fs'),p='addresses/testnet.json';
-          if(!fs.existsSync(p)) { console.error('addresses/testnet.json missing'); process.exit(1); }
-          const a=JSON.parse(fs.readFileSync(p,'utf8'));
-          const need=['USDT','NBL','REG','TREE','POOL','SALE'];
-          for(const k of need){ if(!a[k]){ console.error('Missing',k); process.exit(2);} 
-            fs.appendFileSync(process.env.GITHUB_ENV, `${k}=${a[k]}\n`);
-          }
-          fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `TREASURY=${process.env.TREASURY||'0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `PERMIT2=${process.env.PERMIT2||'0x0000000000000000000000000000000000000000'}\n`);
-          console.log('Loaded addresses:', need.map(k=>a[k]).join(', '));"
+          test -f addresses/testnet.json || { echo "addresses/testnet.json missing"; exit 1; }
 
-      # map secrets → env, फिर step-level if में env यूज़ करें (job-level पर secrets disallowed)
+          # 👉 shell-expansion से बचने के लिए quoted heredoc (NODE) यूज़ किया गया है
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'addresses/testnet.json';
+          const a = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const need = ['USDT','NBL','REG','TREE','POOL','SALE'];
+          for (const k of need) {
+            if (!a[k]) { console.error('Missing', k); process.exit(2); }
+            fs.appendFileSync(process.env.GITHUB_ENV, `${k}=${a[k]}
+`);
+          }
+          // स्थिर/ENV-based values
+          fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998
+`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `TREASURY=${process.env.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'}
+`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `PERMIT2=${process.env.PERMIT2 || '0x0000000000000000000000000000000000000000'}
+`);
+          console.log('Loaded addresses OK');
+          NODE
       - name: Verify on BSC Testnet (Etherscan V2 or BscScan)
         env:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
