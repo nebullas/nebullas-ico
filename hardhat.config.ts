@@ -16,31 +16,18 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_KEY ? [process.env.DEPLOYER_KEY] : []
     }
   },
+  // ❗ plugin जो माँग रहा है उसी फॉर्मेट में key दें (logs में यही माँगा)। 
+  // bscTestnet/bsc दोनों के लिए एक ही env key पढ़ेगा:
   etherscan: {
     apiKey: {
-      // एक ही key variable इस्तेमाल करें; BscScan key हो तो यहाँ रखें
-      bsc:        process.env.ETHERSCAN_API_KEY || process.env.BSCSCAN_KEY || "",
-      bscTestnet: process.env.ETHERSCAN_API_KEY || process.env.BSCSCAN_KEY || ""
+      bscTestnet: process.env.ETHERSCAN_API_KEY || "",
+      bsc:        process.env.ETHERSCAN_API_KEY || "",
     },
     customChains: [
-      {
-        network: "bsc",
-        chainId: 56,
-        urls: {
-          apiURL: "https://api.bscscan.com/api",
-          browserURL: "https://bscscan.com"
-        }
-      },
-      {
-        network: "bscTestnet",
-        chainId: 97,
-        urls: {
-          apiURL: "https://api-testnet.bscscan.com/api",
-          browserURL: "https://testnet.bscscan.com"
-        }
-      }
+      { network: "bscTestnet", chainId: 97, urls: { apiURL: "https://api-testnet.bscscan.com/api", browserURL: "https://testnet.bscscan.com" } },
+      { network: "bsc",        chainId: 56, urls: { apiURL: "https://api.bscscan.com/api",        browserURL: "https://bscscan.com" } }
     ]
-  }
+  },
+  sourcify: { enabled: true }, // logs में hardhat-verify ने यही advise किया था
 };
-
 export default config;
