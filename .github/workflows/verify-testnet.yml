@@ -1,13 +1,15 @@
 name: Verify Testnet (Etherscan V2)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   verify:
+    # secret मौजूद हो तभी जॉब चले
+    if: ${{ secrets.ETHERSCAN_API_KEY != '' }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -28,64 +30,60 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
-      - name: Force CommonJS (package.json + tsconfig)
-        run: |
-          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
-          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
-          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
-
       - name: Install deps
         run: npm i
 
       - name: Compile
         run: npx hardhat compile
 
-      # addresses/testnet.json → $GITHUB_ENV  (quoted heredoc; shell expansion नहीं होगा)
-      - name: Load addresses from addresses/testnet.json
+      - name: Show addresses/testnet.json
         run: |
-          test -f addresses/testnet.json || { echo "addresses/testnet.json missing"; exit 1; }
-          node <<'NODE'
-          const fs = require('fs');
-          const a = JSON.parse(fs.readFileSync('addresses/testnet.json','utf8'));
-          const need = ['USDT','NBL','REG','TREE','POOL','SALE'];
-          for (const k of need) {
-            if (!a[k]) { console.error('Missing', k); process.exit(2); }
-            fs.appendFileSync(process.env.GITHUB_ENV, `${k}=${a[k]}\n`);
-          }
-          fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `TREASURY=${process.env.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `PERMIT2=${process.env.PERMIT2 || '0x0000000000000000000000000000000000000000'}\n`);
-          NODE
+          test -f addresses/testnet.json || (echo "::error file=addresses/testnet.json::Missing file"; exit 1)
+          cat addresses/testnet.json
 
-      # केवल तभी verify चलाएँ जब key मौजूद हो; नहीं तो step skip (job हरा रहेगा)
-      - name: Verify (Etherscan V2)
+      - name: Verify (Etherscan V2 / chainid=97)
         env:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-        if: ${{ env.ETHERSCAN_API_KEY != '' }}
+          # नीचे दो वैरिएबल ज़रूर सेट कर दें (Repo Variables में):
+          DEPLOYER_ADDR: ${{ vars.DEPLOYER_ADDR }}
+          USDT_DECIMALS_TESTNET: ${{ vars.USDT_DECIMALS_TESTNET }}
         run: |
-          echo "Using Etherscan V2 key (masked)."
-          # NBLToken(admin, cap, bonusCap)
-          npx hardhat verify --network bscTestnet "$NBL" \
-            "$ADMIN" \
-            "10000000000000000000000000000" \
-            "1000000000000000000000000000"
+          set -euo pipefail
+          # Node one-liners to pull addresses safely
+          NBL=$(node -p "require('./addresses/testnet.json').NBL")
+          REG=$(node -p "require('./addresses/testnet.json').REG")
+          TREE=$(node -p "require('./addresses/testnet.json').TREE")
+          POOL=$(node -p "require('./addresses/testnet.json').POOL")
+          USDT=$(node -p "require('./addresses/testnet.json').USDT || ''")
+          SALE=$(node -p "require('./addresses/testnet.json').SALE || ''")
 
-          # PartnerRegistry(admin)
-          npx hardhat verify --network bscTestnet "$REG" "$ADMIN"
+          echo "Using:"
+          echo "NBL=$NBL"
+          echo "REG=$REG"
+          echo "TREE=$TREE"
+          echo "POOL=$POOL"
+          echo "USDT=$USDT"
+          echo "SALE=$SALE"
+          echo "DEPLOYER_ADDR=$DEPLOYER_ADDR"
 
-          # PartnerTree(admin)
-          npx hardhat verify --network bscTestnet "$TREE" "$ADMIN"
+          # --- Constructor args (same as deploy_testnet.ts) ---
+          # cap = 10_000_000_000 * 1e18, bonusCap = cap/10
+          CAP=10000000000000000000000000000
+          BONUS=1000000000000000000000000000
 
-          # PoolVault(admin, usdt)
-          npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT"
+          # Verify Token
+          npx hardhat verify --network bscTestnet $NBL $DEPLOYER_ADDR $CAP $BONUS
 
-          # NBLSaleV5(admin,nbl,usdt,reg,tree,pool,treasury,usdtDecimals,mode,min,max,permit2)
-          npx hardhat verify --network bscTestnet "$SALE" \
-            "$ADMIN" "$NBL" "$USDT" "$REG" "$TREE" "$POOL" \
-            "$TREASURY" "18" "0" \
-            "50000000000000000000" "10000000000000000000000" \
-            "$PERMIT2"
+          # Verify PartnerRegistry(admin), PartnerTree(admin)
+          npx hardhat verify --network bscTestnet $REG $DEPLOYER_ADDR
+          npx hardhat verify --network bscTestnet $TREE $DEPLOYER_ADDR
 
-      - name: Skip note (no API key)
-        if: ${{ env.ETHERSCAN_API_KEY == '' }}
-        run: echo "No ETHERSCAN_API_KEY in secrets; skipping verify step."
+          # Verify PoolVault(admin, usdt)
+          if [ -n "$USDT" ]; then
+            npx hardhat verify --network bscTestnet $POOL $DEPLOYER_ADDR $USDT
+          else
+            echo "USDT address missing in addresses/testnet.json; skipping PoolVault verify"
+          fi
+
+          # SALE constructor बहुत बड़ा है; बाद में स्क्रिप्टेड-verify करेंगे।
+          # Hardhat/Etherscan V2 docs: single key + chainid=97 route to BSC Testnet.
