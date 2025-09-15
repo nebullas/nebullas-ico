@@ -1,21 +1,14 @@
 name: Deploy Testnet (Hardhat)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write   # ⬅️ addresses/testnet.json commit/push के लिए
-
-    env:
-      DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
-      RPC_BSC_TESTNET: ${{ vars.RPC_BSC_TESTNET || 'https://data-seed-prebsc-1-s1.binance.org:8545' }}
-      TREASURY: '${{ vars.TREASURY || "0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420" }}'
-      GUARDIAN: '${{ vars.GUARDIAN || "0xE77F94010Fb3B01431E18015A1c9A56F74e79998" }}'
-      USDT_ADDRESS_TESTNET: '${{ vars.USDT_ADDRESS_TESTNET || "" }}'
-      USDT_DECIMALS_TESTNET: '18'
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -24,8 +17,9 @@ jobs:
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 22
 
+      # Peer deps की समस्याओं से बचने के लिए versions pin करें (देखें पुराने लॉग्स)
       - name: Pin Hardhat & Toolbox versions
         run: |
           npm pkg set devDependencies.hardhat=2.26.3
@@ -35,6 +29,13 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
+      # Hardhat को CJS मोड में मजबूर करें (ESM/HJH19 errors से बचाव)
+      - name: Force CommonJS (package.json + tsconfig)
+        run: |
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
+          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
+
       - name: Install deps
         run: npm i
 
@@ -43,20 +44,29 @@ jobs:
 
       - name: Deploy to BSC Testnet
         env:
-          RPC_BSC_TESTNET: ${{ env.RPC_BSC_TESTNET }}
-          TREASURY: ${{ env.TREASURY }}
-          GUARDIAN: ${{ env.GUARDIAN }}
-          USDT_ADDRESS_TESTNET: ${{ env.USDT_ADDRESS_TESTNET }}
-          USDT_DECIMALS_TESTNET: ${{ env.USDT_DECIMALS_TESTNET }}
-          DEPLOYER_KEY: ${{ env.DEPLOYER_KEY }}
+          # secrets/vars से पढ़ें; fallback हमेशा single‑quotes में रखें
+          DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
+          RPC_BSC_TESTNET: ${{ vars.RPC_BSC_TESTNET || 'https://bsc-testnet.drpc.org' }}
+          TREASURY: ${{ vars.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420' }}
+          GUARDIAN: ${{ vars.GUARDIAN || '0xE77F94010Fb3B01431E18015A1c9A56F74e79998' }}
+          USDT_ADDRESS_TESTNET: ${{ vars.USDT_ADDRESS_TESTNET || '' }}
+          USDT_DECIMALS_TESTNET: ${{ vars.USDT_DECIMALS_TESTNET || '18' }}
+          PERMIT2: ${{ vars.PERMIT2 || '0x0000000000000000000000000000000000000000' }}
         run: |
-          npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
+          npx hardhat run scripts/deploy_testnet.ts --network bscTestnet | tee deploy.log
 
-      - name: Persist addresses/testnet.json (commit + push)
+      # deploy.log से addresses निकालकर repo में addresses/testnet.json लिख दें
+      - name: Save addresses to addresses/testnet.json
         run: |
-          test -f addresses/testnet.json
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add addresses/testnet.json
-          git commit -m "chore(ci): update testnet addresses [skip ci]" || echo "No changes"
-          git push
+          mkdir -p addresses
+          node -e "const fs=require('fs');const t=fs.readFileSync('deploy.log','utf8');
+          function m(k){const r=new RegExp('^'+k+': (0x[a-fA-F0-9]{40})','m');const x=t.match(r);return x?x[1]:''}
+          const out={USDT:m('USDT'),NBL:m('NBL'),REG:m('REG'),TREE:m('TREE'),POOL:m('POOL'),SALE:m('SALE')};
+          fs.writeFileSync('addresses/testnet.json', JSON.stringify(out,null,2));"
+          cat addresses/testnet.json
+
+      - name: Upload addresses artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: addresses-testnet
+          path: addresses/testnet.json
