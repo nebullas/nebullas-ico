@@ -1,24 +1,14 @@
 name: Deploy Testnet (Hardhat)
 
 on:
-  workflow_dispatch:
-  push:
-    paths:
-      - "contracts/**"
-      - "scripts/**"
-      - "hardhat.config.ts"
-      - ".github/workflows/deploy-testnet.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-
-    # CI secrets (job-level env में secrets allowed)
-    env:
-      DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
-      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
 
     steps:
       - name: Checkout
@@ -50,33 +40,13 @@ jobs:
       - name: Compile
         run: npx hardhat clean && npx hardhat compile
 
-      - name: Export defaults (TREASURY/GUARDIAN/USDT → $GITHUB_ENV)
-        env:
-          REPO_TREASURY: ${{ vars.TREASURY }}
-          REPO_GUARDIAN: ${{ vars.GUARDIAN }}
-          REPO_USDT: ${{ vars.USDT_ADDRESS_TESTNET }}
-        run: |
-          TREASURY="${REPO_TREASURY}"
-          GUARDIAN="${REPO_GUARDIAN}"
-          USDT_ADDRESS_TESTNET="${REPO_USDT}"
-
-          if [ -f addresses/testnet.json ]; then
-            T2=$(node -e "try{let a=require('./addresses/testnet.json');console.log(a.TREASURY||'');}catch(e){console.log('');}")
-            G2=$(node -e "try{let a=require('./addresses/testnet.json');console.log(a.GUARDIAN||'');}catch(e){console.log('');}")
-            U2=$(node -e "try{let a=require('./addresses/testnet.json');console.log(a.USDT||'');}catch(e){console.log('');}")
-            [ -z "$TREASURY" ] && TREASURY="$T2"
-            [ -z "$GUARDIAN" ] && GUARDIAN="$G2"
-            [ -z "$USDT_ADDRESS_TESTNET" ] && USDT_ADDRESS_TESTNET="$U2"
-          fi
-
-          # Hard defaults (आपके दिये हुए पते)
-          [ -z "$TREASURY" ] && TREASURY=0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420
-          [ -z "$GUARDIAN" ] && GUARDIAN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998
-
-          echo "TREASURY=$TREASURY" >> $GITHUB_ENV
-          echo "GUARDIAN=$GUARDIAN" >> $GITHUB_ENV
-          echo "USDT_ADDRESS_TESTNET=$USDT_ADDRESS_TESTNET" >> $GITHUB_ENV
-          echo "USDT_DECIMALS_TESTNET=18" >> $GITHUB_ENV
-
       - name: Deploy to BSC Testnet
+        env:
+          DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
+          RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET || 'https://data-seed-prebsc-1-s1.binance.org:8545' }}
+          TREASURY: ${{ vars.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420' }}
+          GUARDIAN: ${{ vars.GUARDIAN || '0xE77F94010Fb3B01431E18015A1c9A56F74e79998' }}
+          USDT_ADDRESS_TESTNET: ${{ vars.USDT_ADDRESS_TESTNET || '' }}
+          USDT_DECIMALS_TESTNET: ${{ vars.USDT_DECIMALS_TESTNET || '18' }}
+          PERMIT2: ${{ vars.PERMIT2 || '0x0000000000000000000000000000000000000000' }}
         run: npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
