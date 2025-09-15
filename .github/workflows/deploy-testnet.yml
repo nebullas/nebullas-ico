@@ -1,10 +1,12 @@
 name: Deploy Testnet (Hardhat)
+
 on:
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,7 +19,7 @@ jobs:
       - name: Install deps
         run: npm i
 
-      # Hardhat 2.26+ के लिए ESM enable
+      # Hardhat 2.26+ → ESM enable
       - name: Enable ESM (package.json + tsconfig)
         run: |
           node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='module';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
@@ -31,8 +33,8 @@ jobs:
         env:
           DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
           RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
-          TREASURY: "0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420"
-          GUARDIAN: "0xE77F94010Fb3B01431E18015A1c9A56F74e79998"
-          USDT_ADDRESS_TESTNET: ""        # keep as empty string or put a quoted address
-          USDT_DECIMALS_TESTNET: "18"     # quote numbers to be safe
+          TREASURY: '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'
+          GUARDIAN: '0xE77F94010Fb3B01431E18015A1c9A56F74e79998'
+          USDT_ADDRESS_TESTNET: ''          # keep empty or put quoted address
+          USDT_DECIMALS_TESTNET: '18'       # quote for safety
         run: npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
