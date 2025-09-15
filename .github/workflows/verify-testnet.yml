@@ -16,8 +16,7 @@ jobs:
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
-        with:
-          node-version: 22
+        with: { node-version: 22 }
 
       - name: Pin Hardhat & Toolbox versions
         run: |
@@ -34,7 +33,7 @@ jobs:
       - name: Compile
         run: npx hardhat compile
 
-      # addresses/testnet.json → $GITHUB_ENV  (quoted heredoc → shell expansion safe)
+      # addresses/testnet.json → $GITHUB_ENV (quoted heredoc ⇒ shell-expand बंद)
       - name: Load addresses from addresses/testnet.json
         run: |
           test -f addresses/testnet.json || { echo "addresses/testnet.json missing"; exit 1; }
@@ -46,12 +45,12 @@ jobs:
             if (!a[k]) { console.error('Missing', k); process.exit(2); }
             fs.appendFileSync(process.env.GITHUB_ENV, `${k}=${a[k]}\n`);
           }
-          // optional ADMIN from JSON; fallback Deployer already known from your runs
-          if (a.ADMIN) fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=${a.ADMIN}\n`);
+          // ADMIN optional (deploy logs show 0xE77F... as deployer/admin)
+          fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=${a.ADMIN || '0xE77F94010Fb3B01431E18015A1c9A56F74e79998'}\n`);
           NODE
 
-      # 🔹 Sourcify-first (no key needed) — पहले disabled था, अब verify.sourcify.enabled=true है। :contentReference[oaicite:4]{index=4}
-      - name: Verify via Sourcify
+      # 🔹 Sourcify-first (plugin message में यही कहा—पहले disabled था)
+      - name: Verify via Sourcify (no key needed)
         run: |
           npx hardhat verify --network bscTestnet "$USDT" || true
           npx hardhat verify --network bscTestnet "$NBL"  || true
@@ -60,17 +59,18 @@ jobs:
           npx hardhat verify --network bscTestnet "$POOL" || true
           npx hardhat verify --network bscTestnet "$SALE" || true
 
-      # 🔹 Etherscan fallback — step-level env में secret, फिर if: env.KEY != '' (job-level पर secrets न यूज़ करें)
-      - name: Verify via Etherscan (V2)
+      # 🔹 Etherscan fallback (V2/V1 routing plugin देखेगा) — केवल तब जब KEY मौजूद हो
+      - name: Verify via Etherscan
         env:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
         if: ${{ env.ETHERSCAN_API_KEY != '' }}
         run: |
-          # Minimal: पहले core contracts
-          npx hardhat verify --network bscTestnet "$NBL"  "0xE77F94010Fb3B01431E18015A1c9A56F74e79998" "10000000000000000000000000000" "1000000000000000000000000000"
-          npx hardhat verify --network bscTestnet "$REG"  "0xE77F94010Fb3B01431E18015A1c9A56F74e79998"
-          npx hardhat verify --network bscTestnet "$TREE" "0xE77F94010Fb3B01431E18015A1c9A56F74e79998"
-          npx hardhat verify --network bscTestnet "$POOL" "0xE77F94010Fb3B01431E18015A1c9A56F74e79998" "$USDT"
+          echo "Using Etherscan key (masked)."
+          npx hardhat verify --network bscTestnet "$NBL"  "$ADMIN" "10000000000000000000000000000" "1000000000000000000000000000"
+          npx hardhat verify --network bscTestnet "$REG"  "$ADMIN"
+          npx hardhat verify --network bscTestnet "$TREE" "$ADMIN"
+          npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT"
+          # SALE complex है; ऊपर Sourcify से हो चुका तो अच्छा है। जरूरत हो तो बाद में helper script से।
 
       - name: Done
-        run: echo "Verification flow finished (Sourcify first; Etherscan attempted if key present)."
+        run: echo "Verification finished (Sourcify first; Etherscan attempted if key present)."
