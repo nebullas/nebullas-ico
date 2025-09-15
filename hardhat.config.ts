@@ -10,7 +10,7 @@ const config: HardhatUserConfig = {
   },
   networks: {
     bscTestnet: {
-      url: process.env.RPC_BSC_TESTNET || "https://data-seed-prebsc-1-s1.binance.org:8545",
+      url: process.env.RPC_BSC_TESTNET || "https://bsc-testnet.publicnode.com",
       chainId: 97,
       accounts: process.env.DEPLOYER_KEY ? [process.env.DEPLOYER_KEY] : [],
     },
@@ -20,19 +20,13 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_KEY ? [process.env.DEPLOYER_KEY] : [],
     },
   },
-  // ✅ यही फॉर्मेट plugin को चाहिए (लॉग में यही निर्देश है)
-  // etherscan.apiKey.bscTestnet / bsc + Sourcify enable
+  // BscScan key न हो तो भी OK (verify step skip हो जाएगा)
   etherscan: {
     apiKey: {
-      bscTestnet: process.env.ETHERSCAN_API_KEY || "",
-      bsc:        process.env.ETHERSCAN_API_KEY || "",
+      bscTestnet: process.env.BSCSCAN_KEY || "",
+      bsc: process.env.BSCSCAN_KEY || "",
     },
-    customChains: [
-      { network: "bscTestnet", chainId: 97, urls: { apiURL: "https://api-testnet.bscscan.com/api", browserURL: "https://testnet.bscscan.com" } },
-      { network: "bsc",        chainId: 56, urls: { apiURL: "https://api.bscscan.com/api",        browserURL: "https://bscscan.com" } },
-    ],
   },
-  sourcify: { enabled: true }, // लॉग के निर्देशानुसार
 };
 
 export default config;
