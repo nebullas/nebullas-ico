@@ -1,4 +1,4 @@
-name: Verify Testnet (Etherscan V2)
+name: Verify Testnet (Hardhat)
 
 on:
   workflow_dispatch:
@@ -8,18 +8,28 @@ permissions:
 
 jobs:
   verify:
-    # secret मौजूद हो तभी जॉब चले
-    if: ${{ secrets.ETHERSCAN_API_KEY != '' }}
     runs-on: ubuntu-24.04
+
+    env:
+      # Node & RPC
+      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET || 'https://data-seed-prebsc-1-s1.binance.org:8545' }}
+      # Etherscan/BscScan key resolution (prefer BscScan, else Etherscan V2)
+      ETHERSCAN_API_KEY: ${{ secrets.BSCSCAN_KEY != '' && secrets.BSCSCAN_KEY || secrets.ETHERSCAN_API_KEY }}
+      # Gate the step without referencing `secrets` in `if:`
+      SHOULD_VERIFY:    ${{ (secrets.BSCSCAN_KEY != '' || secrets.ETHERSCAN_API_KEY != '') && 'true' || 'false' }}
+
+      # Constructor params reused by the script
+      TREASURY:              '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'
+      USDT_DECIMALS_TESTNET: '18'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 22
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
       - name: Pin Hardhat & Toolbox versions
         run: |
@@ -30,60 +40,27 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
+      - name: Force CommonJS (package.json + tsconfig)
+        run: |
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
+          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8')); if(p.type==='module'){process.exit(1)}"
+
       - name: Install deps
         run: npm i
 
       - name: Compile
         run: npx hardhat compile
 
-      - name: Show addresses/testnet.json
+      - name: Show API key presence (debug)
         run: |
-          test -f addresses/testnet.json || (echo "::error file=addresses/testnet.json::Missing file"; exit 1)
-          cat addresses/testnet.json
+          if [ -z "${ETHERSCAN_API_KEY}" ]; then echo "No API key present -> verify will be skipped"; else echo "API key present -> verify will run"; fi
 
-      - name: Verify (Etherscan V2 / chainid=97)
-        env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-          # नीचे दो वैरिएबल ज़रूर सेट कर दें (Repo Variables में):
-          DEPLOYER_ADDR: ${{ vars.DEPLOYER_ADDR }}
-          USDT_DECIMALS_TESTNET: ${{ vars.USDT_DECIMALS_TESTNET }}
-        run: |
-          set -euo pipefail
-          # Node one-liners to pull addresses safely
-          NBL=$(node -p "require('./addresses/testnet.json').NBL")
-          REG=$(node -p "require('./addresses/testnet.json').REG")
-          TREE=$(node -p "require('./addresses/testnet.json').TREE")
-          POOL=$(node -p "require('./addresses/testnet.json').POOL")
-          USDT=$(node -p "require('./addresses/testnet.json').USDT || ''")
-          SALE=$(node -p "require('./addresses/testnet.json').SALE || ''")
+      - name: Verify contracts from addresses/testnet.json
+        if: env.SHOULD_VERIFY == 'true'
+        run: npx hardhat run scripts/verify_testnet.ts --network bscTestnet
 
-          echo "Using:"
-          echo "NBL=$NBL"
-          echo "REG=$REG"
-          echo "TREE=$TREE"
-          echo "POOL=$POOL"
-          echo "USDT=$USDT"
-          echo "SALE=$SALE"
-          echo "DEPLOYER_ADDR=$DEPLOYER_ADDR"
-
-          # --- Constructor args (same as deploy_testnet.ts) ---
-          # cap = 10_000_000_000 * 1e18, bonusCap = cap/10
-          CAP=10000000000000000000000000000
-          BONUS=1000000000000000000000000000
-
-          # Verify Token
-          npx hardhat verify --network bscTestnet $NBL $DEPLOYER_ADDR $CAP $BONUS
-
-          # Verify PartnerRegistry(admin), PartnerTree(admin)
-          npx hardhat verify --network bscTestnet $REG $DEPLOYER_ADDR
-          npx hardhat verify --network bscTestnet $TREE $DEPLOYER_ADDR
-
-          # Verify PoolVault(admin, usdt)
-          if [ -n "$USDT" ]; then
-            npx hardhat verify --network bscTestnet $POOL $DEPLOYER_ADDR $USDT
-          else
-            echo "USDT address missing in addresses/testnet.json; skipping PoolVault verify"
-          fi
-
-          # SALE constructor बहुत बड़ा है; बाद में स्क्रिप्टेड-verify करेंगे।
-          # Hardhat/Etherscan V2 docs: single key + chainid=97 route to BSC Testnet.
+      - name: Skip note
+        if: env.SHOULD_VERIFY != 'true'
+        run: echo "Skipping verification (no API key). Deploys are already successful."
