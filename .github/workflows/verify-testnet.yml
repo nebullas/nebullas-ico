@@ -1,23 +1,14 @@
-name: Verify (BSC Testnet)
+name: Verify Testnet (Etherscan V2)
 
 on:
-  workflow_dispatch:
-  workflow_run:
-    workflows: ["Deploy Testnet (Hardhat)"]
-    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-
-    # secrets/vars job env में लाएँ; step-level 'if' में env.* read होगा
-    env:
-      DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
-      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
-      ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}  # optional (MultiChain)
-      BSCSCAN_KEY: ${{ secrets.BSCSCAN_KEY }}              # optional (BscScan)
 
     steps:
       - name: Checkout
@@ -47,52 +38,54 @@ jobs:
         run: npm i
 
       - name: Compile
-        run: npx hardhat clean && npx hardhat compile
+        run: npx hardhat compile
 
-      - name: Load deployed addresses → $GITHUB_ENV
+      # addresses/testnet.json → $GITHUB_ENV  (quoted heredoc; shell expansion नहीं होगा)
+      - name: Load addresses from addresses/testnet.json
         run: |
-          if [ ! -f addresses/testnet.json ]; then
-            echo "HAS_ADDRS=0" >> $GITHUB_ENV
-            echo "No addresses/testnet.json found. Skipping verification."
-            exit 0
-          fi
-          echo "HAS_ADDRS=1" >> $GITHUB_ENV
-          for k in NBL REG TREE POOL USDT; do
-            echo "$k=$(node -e "let a=require('./addresses/testnet.json');console.log(a['$k']||'')")" >> $GITHUB_ENV
-          done
-          # Admin used at deploy (your deployer)
-          echo "ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998" >> $GITHUB_ENV
+          test -f addresses/testnet.json || { echo "addresses/testnet.json missing"; exit 1; }
+          node <<'NODE'
+          const fs = require('fs');
+          const a = JSON.parse(fs.readFileSync('addresses/testnet.json','utf8'));
+          const need = ['USDT','NBL','REG','TREE','POOL','SALE'];
+          for (const k of need) {
+            if (!a[k]) { console.error('Missing', k); process.exit(2); }
+            fs.appendFileSync(process.env.GITHUB_ENV, `${k}=${a[k]}\n`);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `TREASURY=${process.env.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `PERMIT2=${process.env.PERMIT2 || '0x0000000000000000000000000000000000000000'}\n`);
+          NODE
 
-      - name: Decide if we have any API key
+      # केवल तभी verify चलाएँ जब key मौजूद हो; नहीं तो step skip (job हरा रहेगा)
+      - name: Verify (Etherscan V2)
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        if: ${{ env.ETHERSCAN_API_KEY != '' }}
         run: |
-          if [ -n "$ETHERSCAN_API_KEY" ] || [ -n "$BSCSCAN_KEY" ]; then
-            echo "HAS_API=1" >> $GITHUB_ENV
-          else
-            echo "HAS_API=0" >> $GITHUB_ENV
-          fi
-
-      - name: Verify NBLToken
-        if: env.HAS_API == '1' && env.HAS_ADDRS == '1' && env.NBL != ''
-        run: |
-          # constructor: (admin, cap, bonusCap)
-          npx hardhat verify --network bscTestnet \
-            "$NBL" \
+          echo "Using Etherscan V2 key (masked)."
+          # NBLToken(admin, cap, bonusCap)
+          npx hardhat verify --network bscTestnet "$NBL" \
             "$ADMIN" \
             "10000000000000000000000000000" \
             "1000000000000000000000000000"
 
-      - name: Verify PartnerRegistry
-        if: env.HAS_API == '1' && env.HAS_ADDRS == '1' && env.REG != ''
-        run: npx hardhat verify --network bscTestnet "$REG" "$ADMIN"
+          # PartnerRegistry(admin)
+          npx hardhat verify --network bscTestnet "$REG" "$ADMIN"
 
-      - name: Verify PartnerTree
-        if: env.HAS_API == '1' && env.HAS_ADDRS == '1' && env.TREE != ''
-        run: npx hardhat verify --network bscTestnet "$TREE" "$ADMIN"
+          # PartnerTree(admin)
+          npx hardhat verify --network bscTestnet "$TREE" "$ADMIN"
 
-      - name: Verify PoolVault
-        if: env.HAS_API == '1' && env.HAS_ADDRS == '1' && env.POOL != '' && env.USDT != ''
-        run: npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT"
+          # PoolVault(admin, usdt)
+          npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT"
 
-      - name: Skip (no API key)
-        if: env.HAS_API != '1'
-        run: echo "Skipping verification: no API key present."
+          # NBLSaleV5(admin,nbl,usdt,reg,tree,pool,treasury,usdtDecimals,mode,min,max,permit2)
+          npx hardhat verify --network bscTestnet "$SALE" \
+            "$ADMIN" "$NBL" "$USDT" "$REG" "$TREE" "$POOL" \
+            "$TREASURY" "18" "0" \
+            "50000000000000000000" "10000000000000000000000" \
+            "$PERMIT2"
+
+      - name: Skip note (no API key)
+        if: ${{ env.ETHERSCAN_API_KEY == '' }}
+        run: echo "No ETHERSCAN_API_KEY in secrets; skipping verify step."
