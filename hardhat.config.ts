@@ -17,7 +17,6 @@ const config: HardhatUserConfig = {
     }
   },
   etherscan: {
-    // V2 multichain key को secret: ETHERSCAN_API_KEY में रखें
     apiKey: {
       bsc: process.env.ETHERSCAN_API_KEY || "",
       bscTestnet: process.env.ETHERSCAN_API_KEY || ""
