@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: 22
 
-      # Peer deps की समस्याओं से बचने के लिए versions pin करें (देखें पुराने लॉग्स)
+      # hardhat/toolbox peer‑deps pin
       - name: Pin Hardhat & Toolbox versions
         run: |
           npm pkg set devDependencies.hardhat=2.26.3
@@ -29,7 +29,7 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
-      # Hardhat को CJS मोड में मजबूर करें (ESM/HJH19 errors से बचाव)
+      # CJS मोड (Hardhat HH19/ESM errors से बचाव)
       - name: Force CommonJS (package.json + tsconfig)
         run: |
           node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
@@ -44,7 +44,6 @@ jobs:
 
       - name: Deploy to BSC Testnet
         env:
-          # secrets/vars से पढ़ें; fallback हमेशा single‑quotes में रखें
           DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
           RPC_BSC_TESTNET: ${{ vars.RPC_BSC_TESTNET || 'https://bsc-testnet.drpc.org' }}
           TREASURY: ${{ vars.TREASURY || '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420' }}
@@ -55,7 +54,6 @@ jobs:
         run: |
           npx hardhat run scripts/deploy_testnet.ts --network bscTestnet | tee deploy.log
 
-      # deploy.log से addresses निकालकर repo में addresses/testnet.json लिख दें
       - name: Save addresses to addresses/testnet.json
         run: |
           mkdir -p addresses
