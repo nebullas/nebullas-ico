@@ -1,46 +1,70 @@
-name: Verify Testnet (BscScan/Sourcify)
+name: Verify Testnet (BscScan/Sourcify-ready)
 
 on:
   workflow_dispatch:
     inputs:
-      USDT:
-        description: "USDT (Mock on testnet) address"
-        required: false
-        default: ""
-      NBL:
-        description: "NBLToken address"
-        required: false
-        default: ""
-      REG:
-        description: "PartnerRegistry address"
-        required: false
-        default: ""
-      TREE:
-        description: "PartnerTree address"
-        required: false
-        default: ""
-      POOL:
-        description: "PoolVault address"
-        required: false
-        default: ""
-      SALE:
-        description: "NBLSaleV5 address"
-        required: false
-        default: ""
-
-permissions:
-  contents: read
-
-env:
-  RPC_BSC_TESTNET: https://data-seed-prebsc-1-s1.binance.org:8545
+      usdt:
+        description: 'USDT (mUSDT) address 0x…'
+        type: string
+        required: true
+      nbl:
+        description: 'NBLToken address 0x…'
+        type: string
+        required: true
+      reg:
+        description: 'PartnerRegistry address 0x…'
+        type: string
+        required: true
+      tree:
+        description: 'PartnerTree address 0x…'
+        type: string
+        required: true
+      pool:
+        description: 'PoolVault address 0x…'
+        type: string
+        required: true
+      sale:
+        description: 'NBLSaleV5 address 0x…'
+        type: string
+        required: true
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    # ❗️secrets को सीधे if: में नहीं—पहले env में map करें, फिर if में env.* यूज़ करें
+    env:
+      # Inputs → ENV (addresses quoted to avoid YAML hex-int)
+      USDT: '${{ inputs.usdt }}'
+      NBL:  '${{ inputs.nbl }}'
+      REG:  '${{ inputs.reg }}'
+      TREE: '${{ inputs.tree }}'
+      POOL: '${{ inputs.pool }}'
+      SALE: '${{ inputs.sale }}'
+
+      # Deploy script के कॉन्स्टैंट्स (logs confirm same params)
+      ADMIN: '0xE77F94010Fb3B01431E18015A1c9A56F74e79998'
+      TREASURY: '${{ vars.TREASURY || "0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420" }}'
+      USDT_DEC: '18'
+      CAP:   '10000000000000000000000000000'   # 10_000_000_000 * 1e18
+      BONUS: '1000000000000000000000000000'    # 10% of CAP
+      MIN:   '50000000000000000000'            # 50 * 1e18
+      MAX:   '10000000000000000000000'         # 10_000 * 1e18
+      PERMIT2: '0x0000000000000000000000000000000000000000'
+
+      # Etherscan V2 Multichain key (optional)
+      ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Pin Hardhat & Toolbox versions
         run: |
@@ -51,43 +75,36 @@ jobs:
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
 
-      - name: Force CommonJS (package.json + tsconfig)
-        run: |
-          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
-          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
-          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
+      - name: Install deps
+        run: npm i
 
-      - run: npm i
       - name: Compile
         run: npx hardhat compile
-        env:
-          RPC_BSC_TESTNET: ${{ env.RPC_BSC_TESTNET }}
 
-      # ---- Sourcify (no API key) ----
-      - name: Verify via Sourcify (no key)
-        shell: bash
+      # ✅ अब 'secrets' को if: में सीधे यूज़ नहीं; env से जाँच
+      - name: Etherscan verify (runs only if API key present)
+        if: ${{ env.ETHERSCAN_API_KEY != '' }}
         run: |
-          set -e
-          addr() { [ -n "$1" ] && npx hardhat verify --verifier sourcify --network bscTestnet "$1" || true; }
-          addr "${{ inputs.USDT }}"
-          addr "${{ inputs.NBL }}"
-          addr "${{ inputs.REG }}"
-          addr "${{ inputs.TREE }}"
-          addr "${{ inputs.POOL }}"
-          addr "${{ inputs.SALE }}"
+          echo "Using ETHERSCAN_API_KEY (present)."
+          # MockUSDT (uint8 decimals)
+          npx hardhat verify --network bscTestnet "$USDT" $USDT_DEC
+          # NBLToken (admin, cap, bonusCap)
+          npx hardhat verify --network bscTestnet "$NBL" "$ADMIN" "$CAP" "$BONUS"
+          # PartnerRegistry(admin)
+          npx hardhat verify --network bscTestnet "$REG" "$ADMIN"
+          # PartnerTree(admin)
+          npx hardhat verify --network bscTestnet "$TREE" "$ADMIN"
+          # PoolVault(admin, usdt)
+          npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT"
+          # NBLSaleV5 full constructor
+          npx hardhat verify --network bscTestnet "$SALE" "$ADMIN" "$NBL" "$USDT" "$REG" "$TREE" "$POOL" "$TREASURY" $USDT_DEC 0 "$MIN" "$MAX" "$PERMIT2"
 
-      # ---- Optional: Etherscan V2 fallback (single key, multichain) ----
-      - name: Verify via Etherscan V2 (fallback)
-        if: ${{ secrets.ETHERSCAN_API_KEY != '' }}
-        shell: bash
-        env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+      - name: Finish (no‑op if key absent)
         run: |
-          set -e
-          v2() { [ -n "$1" ] && npx hardhat verify --network bscTestnet "$1" || true; }
-          v2 "${{ inputs.USDT }}"
-          v2 "${{ inputs.NBL }}"
-          v2 "${{ inputs.REG }}"
-          v2 "${{ inputs.TREE }}"
-          v2 "${{ inputs.POOL }}"
-          v2 "${{ inputs.SALE }}"
+          echo "Verify flow finished (Etherscan step skipped if no key)."
+          echo "USDT=$USDT"
+          echo "NBL=$NBL"
+          echo "REG=$REG"
+          echo "TREE=$TREE"
+          echo "POOL=$POOL"
+          echo "SALE=$SALE"
