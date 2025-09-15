@@ -6,7 +6,8 @@
     "test": "hardhat test",
     "compile": "hardhat compile",
     "coverage": "hardhat coverage",
-    "deploy:testnet": "hardhat run scripts/deploy_testnet.ts --network bscTestnet"
+    "deploy:testnet": "hardhat run scripts/deploy_testnet.ts --network bscTestnet",
+    "verify:testnet": "hardhat run scripts/verify_testnet.ts --network bscTestnet"
   },
   "keywords": [],
   "author": "",
