@@ -3,6 +3,9 @@ import "@nomicfoundation/hardhat-toolbox";
 import * as dotenv from "dotenv";
 dotenv.config();
 
+const ETHERSCAN_KEY = process.env.ETHERSCAN_API_KEY || "";
+
+// ✅ Sourcify = ON (no API key needed); Etherscan V2 key optional fallback
 const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.26",
@@ -20,14 +23,27 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_KEY ? [process.env.DEPLOYER_KEY] : [],
     },
   },
-  etherscan: {
-    // NOTE: Hardhat-verify picks per-network key. We coalesce to one env var.
-    apiKey: {
-      bsc:       process.env.ETHERSCAN_API_KEY || process.env.BSCSCAN_KEY || "",
-      bscTestnet:process.env.ETHERSCAN_API_KEY || process.env.BSCSCAN_KEY || "",
-      // (Optionally add mainnet/sepolia keys here if needed)
+  // Hardhat Verify (new config) — Sourcify first, then Etherscan (if key present)
+  verify: {
+    etherscan: {
+      apiKey: ETHERSCAN_KEY,
+      // Optional: route via V2 chainid endpoints (plugin will choose automatically if needed)
+      customChains: [
+        {
+          network: "bsc",
+          chainId: 56,
+          urls: { apiURL: "https://api.bscscan.com/api", browserURL: "https://bscscan.com" },
+        },
+        {
+          network: "bscTestnet",
+          chainId: 97,
+          urls: { apiURL: "https://api-testnet.bscscan.com/api", browserURL: "https://testnet.bscscan.com" },
+        },
+      ],
     },
-    // customChains can be added if you point to non-default explorers.
+    sourcify: {
+      enabled: true,
+    },
   },
 };
 
