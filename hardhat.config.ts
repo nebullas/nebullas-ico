@@ -5,7 +5,6 @@ dotenv.config();
 
 const ETHERSCAN_KEY = process.env.ETHERSCAN_API_KEY || "";
 
-// ✅ Sourcify = ON (no API key needed); Etherscan V2 key optional fallback
 const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.26",
@@ -23,27 +22,17 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_KEY ? [process.env.DEPLOYER_KEY] : [],
     },
   },
-  // Hardhat Verify (new config) — Sourcify first, then Etherscan (if key present)
+  // ✅ Sourcify-first (no API key needed), Etherscan fallback (V2 single key) — logs में इसी की ज़रूरत दिखी
+  // Sourcify disabled होने के कारण पहले skip संदेश आ रहा था; अब enable है। :contentReference[oaicite:3]{index=3}
   verify: {
     etherscan: {
       apiKey: ETHERSCAN_KEY,
-      // Optional: route via V2 chainid endpoints (plugin will choose automatically if needed)
       customChains: [
-        {
-          network: "bsc",
-          chainId: 56,
-          urls: { apiURL: "https://api.bscscan.com/api", browserURL: "https://bscscan.com" },
-        },
-        {
-          network: "bscTestnet",
-          chainId: 97,
-          urls: { apiURL: "https://api-testnet.bscscan.com/api", browserURL: "https://testnet.bscscan.com" },
-        },
+        { network: "bsc",        chainId: 56, urls: { apiURL: "https://api.bscscan.com/api",        browserURL: "https://bscscan.com" } },
+        { network: "bscTestnet", chainId: 97, urls: { apiURL: "https://api-testnet.bscscan.com/api", browserURL: "https://testnet.bscscan.com" } },
       ],
     },
-    sourcify: {
-      enabled: true,
-    },
+    sourcify: { enabled: true },
   },
 };
 
