@@ -20,33 +20,14 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_KEY ? [process.env.DEPLOYER_KEY] : [],
     },
   },
-
-  // Etherscan V2 (Multichain) -- single key across chains with chainid
-  // Docs: https://docs.etherscan.io/etherscan-v2  (see "Single API Key" + "/v2" + "chainid")
-  verify: {
-    etherscan: {
-      apiKey: process.env.ETHERSCAN_API_KEY || "",
-
-      // BSC mainnet/testnet routed through Etherscan v2 with chainid
-      customChains: [
-        {
-          network: "bsc",
-          chainId: 56,
-          urls: {
-            apiURL: "https://api.etherscan.io/v2/api?chainid=56",
-            browserURL: "https://bscscan.com",
-          },
-        },
-        {
-          network: "bscTestnet",
-          chainId: 97,
-          urls: {
-            apiURL: "https://api.etherscan.io/v2/api?chainid=97",
-            browserURL: "https://testnet.bscscan.com",
-          },
-        },
-      ],
+  etherscan: {
+    // NOTE: Hardhat-verify picks per-network key. We coalesce to one env var.
+    apiKey: {
+      bsc:       process.env.ETHERSCAN_API_KEY || process.env.BSCSCAN_KEY || "",
+      bscTestnet:process.env.ETHERSCAN_API_KEY || process.env.BSCSCAN_KEY || "",
+      // (Optionally add mainnet/sepolia keys here if needed)
     },
+    // customChains can be added if you point to non-default explorers.
   },
 };
 
