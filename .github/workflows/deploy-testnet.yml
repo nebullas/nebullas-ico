@@ -6,7 +6,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,10 +15,20 @@ jobs:
         with:
           node-version: '22'
 
+      # ⛓️ Pin exact dev toolchain versions (resolves ERESOLVE)
+      - name: Pin Hardhat & toolbox versions
+        run: |
+          npm pkg set devDependencies.hardhat=2.26.3
+          npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
+          npm pkg set devDependencies.typescript=5.4.5
+          npm pkg set devDependencies.ts-node=10.9.1
+          npm pkg set devDependencies["@types/node"]=20.11.30
+          npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
+
       - name: Install deps
         run: npm i
 
-      # Hardhat 2.26+ → ESM enable
+      # 🔄 Hardhat 2.26+ पर ESM safe switch (CJS → ESM)
       - name: Enable ESM (package.json + tsconfig)
         run: |
           node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='module';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
@@ -35,6 +44,6 @@ jobs:
           RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
           TREASURY: '0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420'
           GUARDIAN: '0xE77F94010Fb3B01431E18015A1c9A56F74e79998'
-          USDT_ADDRESS_TESTNET: ''          # keep empty or put quoted address
-          USDT_DECIMALS_TESTNET: '18'       # quote for safety
+          USDT_ADDRESS_TESTNET: ''         # keep empty or put a quoted address
+          USDT_DECIMALS_TESTNET: '18'
         run: npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
