@@ -57,7 +57,6 @@ jobs:
 
       - name: Verify on BSC Testnet
         env:
-          # Etherscan multi-chain key (Etherscan/BscScan दोनों के लिए)
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY || secrets.BSCSCAN_KEY }}
         run: |
           # NBLToken(admin, cap, bonusCap)
@@ -76,7 +75,7 @@ jobs:
           npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT"
 
           # NBLSaleV5(admin, nbl, usdt, reg, tree, pool, treasury, usdtDecimals, mode, min, max, permit2)
-          # mode=0(INSTANT), min=50e18, max=10000e18 (USDT decimals=18 on BSC testnet)
+          # mode=0 (INSTANT), min=50e18, max=10000e18  — BSC testnet USDT decimals=18
           npx hardhat verify --network bscTestnet "$SALE" \
             "$ADMIN" "$NBL" "$USDT" "$REG" "$TREE" "$POOL" \
             "$TREASURY" "18" "0" \
