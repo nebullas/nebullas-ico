@@ -1,14 +1,18 @@
-name: Verify Testnet (Etherscan)
+name: Verify Testnet (Sourcify + Etherscan)
 
 on:
-  workflow_dispatch: {}
-
-permissions:
-  contents: read
+  workflow_dispatch:
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    env:
+      RPC_BSC_TESTNET:  ${{ secrets.RPC_BSC_TESTNET }}
+      DEPLOYER_KEY:     ${{ secrets.DEPLOYER_KEY }}
+      ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}  # Etherscan V2 / Multichain
+      TREASURY:         ${{ vars.TREASURY }}
+      GUARDIAN:         ${{ vars.GUARDIAN }}
+      USDT_DECIMALS_TESTNET: 18
 
     steps:
       - name: Checkout
@@ -16,54 +20,38 @@ jobs:
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
-        with: { node-version: 22 }
+        with:
+          node-version: 22
 
       - name: Pin Hardhat & Toolbox versions
         run: |
           npm pkg set devDependencies.hardhat=2.26.3
-          npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
+          npm pkg set devDependencies.@nomicfoundation/hardhat-toolbox=6.1.0
           npm pkg set devDependencies.typescript=5.4.5
           npm pkg set devDependencies.ts-node=10.9.1
-          npm pkg set devDependencies["@types/node"]=20.11.30
-          npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
-          npm i
+          npm pkg set devDependencies.@types/node=20.11.30
+          npm pkg set dependencies.@openzeppelin/contracts=5.0.2
+
+      - name: Install deps
+        run: npm i
+
+      - name: Force CommonJS (package.json + tsconfig)
+        run: |
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
+          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
 
       - name: Compile
         run: npx hardhat compile
 
-      # addresses/testnet.json → env (jq, no heredoc)
-      - name: Load addresses
+      # Sourcify auto-verify (no API key needed)
+      - name: Sourcify publish (optional)
         run: |
-          test -f addresses/testnet.json
-          echo "SALE=$(jq -r '.SALE' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "NBL=$(jq -r '.NBL' addresses/testnet.json)"   >> $GITHUB_ENV
-          echo "USDT=$(jq -r '.USDT' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "REG=$(jq -r '.REG' addresses/testnet.json)"   >> $GITHUB_ENV
-          echo "TREE=$(jq -r '.TREE' addresses/testnet.json)" >> $GITHUB_ENV
-          echo "POOL=$(jq -r '.POOL' addresses/testnet.json)" >> $GITHUB_ENV
-          # deploy logs में admin यही था:
-          echo "ADMIN=0xE77F94010Fb3B01431E18015A1c9A56F74e79998" >> $GITHUB_ENV
+          echo "Skipping explicit Sourcify CLI (Hardhat etherscan plugin publishes on verify)."
 
-      # key detection (step-env → flag)
-      - name: Detect Etherscan key
+      # Etherscan verify – केवल तब, जब key present हो
+      - name: Verify via Etherscan (only if key present)
+        if: ${{ env.ETHERSCAN_API_KEY != '' }}
         env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-        run: |
-          if [ -n "$ETHERSCAN_API_KEY" ]; then echo HAS_KEY=1 >> $GITHUB_ENV; else echo HAS_KEY=0 >> $GITHUB_ENV; fi
-
-      # Verify only when key present; simple args inline; no heredoc
-      - name: Verify core contracts (if key present)
-        if: env.HAS_KEY == '1'
-        env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-        run: |
-          echo "Using Etherscan key (masked)."
-          npx hardhat verify --network bscTestnet "$NBL"  "$ADMIN" "10000000000000000000000000000" "1000000000000000000000000000" || true
-          npx hardhat verify --network bscTestnet "$REG"  "$ADMIN" || true
-          npx hardhat verify --network bscTestnet "$TREE" "$ADMIN" || true
-          npx hardhat verify --network bscTestnet "$POOL" "$ADMIN" "$USDT" || true
-          # SALE का verify बड़ा है; पहले चार के ग्रीन होते ही SALE पर जाएंगे
-
-      - name: Skip note (no key)
-        if: env.HAS_KEY != '1'
-        run: echo "No ETHERSCAN_API_KEY in Secrets → skipping Etherscan verify."
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npx hardhat run scripts/verify_all.ts --network bscTestnet
