@@ -1,1 +1,61 @@
+name: Verify Testnet (Etherscan V2 key optional)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RPC_BSC_TESTNET:  ${{ vars.RPC_BSC_TESTNET }}
+  ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}  # may be empty; step-level if will guard
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Pin Hardhat & Toolbox versions
+        run: |
+          npm pkg set devDependencies.hardhat=2.26.3
+          npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
+          npm pkg set devDependencies.typescript=5.4.5
+          npm pkg set devDependencies.ts-node=10.9.1
+          npm pkg set devDependencies["@types/node"]=20.11.30
+          npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
+
+      - name: Force CommonJS (package.json + tsconfig)
+        run: |
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
+          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
+
+      - run: npm i
+
+      - name: Compile
+        run: npx hardhat clean && npx hardhat compile
+        env:
+          RPC_BSC_TESTNET: ${{ env.RPC_BSC_TESTNET }}
+
+      # Etherscan verify will run ONLY if a key is present (correct if syntax).
+      - name: Verify via Etherscan V2 (only if key present)
+        if: ${{ env.ETHERSCAN_API_KEY != '' }}
+        env:
+          ETHERSCAN_API_KEY: ${{ env.ETHERSCAN_API_KEY }}
+          RPC_BSC_TESTNET:  ${{ env.RPC_BSC_TESTNET }}
+        run: |
+          # Expect addresses stored in addresses/testnet.json (you said they are present)
+          test -f addresses/testnet.json || { echo "addresses/testnet.json missing"; exit 1; }
+
+          # Example: just print; actual verify requires constructor args per contract.
+          node -e "console.log('Addresses:', require('./addresses/testnet.json'))"
+
+          # If you want, add targeted verify commands here for each contract using the addresses file.
+          # Keeping non-fatal for now:
+          echo "Etherscan verify step placeholder (key present)."
 # (यहाँ ऊपर वाला verify-testnet.yml पूरा पेस्ट करें)
