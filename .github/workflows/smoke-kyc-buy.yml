@@ -1,15 +1,26 @@
 name: Smoke KYC+Buy (Testnet)
-on: { workflow_dispatch: {} }
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-kyc-buy
+  cancel-in-progress: true
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
+      DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-
-      # Toolchain pin (same as deploy) → npm peer conflicts से बचाव
-      - name: Pin toolchain
+        with: { node-version: 22 }
+      - name: Pin Hardhat & Toolbox versions
         run: |
           npm pkg set devDependencies.hardhat=2.26.3
           npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
@@ -17,12 +28,7 @@ jobs:
           npm pkg set devDependencies.ts-node=10.9.1
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
-
       - run: npm i
       - run: npx hardhat compile
-
-      - name: Run smoke
-        env:
-          DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
-          RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
+      - name: Run smoke script
         run: npx hardhat run scripts/smoke_kyc_buy.ts --network bscTestnet
