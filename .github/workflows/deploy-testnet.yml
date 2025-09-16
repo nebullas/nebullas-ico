@@ -6,47 +6,52 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     env:
+      # Secrets (Settings → Secrets and variables → Actions → Secrets)
       RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
       DEPLOYER_KEY:    ${{ secrets.DEPLOYER_KEY }}
 
-      TREASURY:        ${{ vars.TREASURY }}
-      GUARDIAN:        ${{ vars.GUARDIAN }}
+      # Variables (Settings → Secrets and variables → Actions → Variables)
+      TREASURY:             ${{ vars.TREASURY }}
+      GUARDIAN:             ${{ vars.GUARDIAN }}
       USDT_ADDRESS_TESTNET: ${{ vars.USDT_ADDRESS_TESTNET }}
+      USDT_DECIMALS_TESTNET: 18
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Pin versions
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Hardhat/Toolbox exact versions (peer deps resolution stable)
+      - name: Pin Hardhat & Toolbox versions
         run: |
           npm pkg set devDependencies.hardhat=2.26.3
-          npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
+          npm pkg set devDependencies.@nomicfoundation/hardhat-toolbox=6.1.0
           npm pkg set devDependencies.typescript=5.4.5
           npm pkg set devDependencies.ts-node=10.9.1
-          npm pkg set devDependencies["@types/node"]=20.11.30
-          npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
-          # Force CommonJS (Hardhat happy)
-          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          npm pkg set devDependencies.@types/node=20.11.30
+          npm pkg set dependencies.@openzeppelin/contracts=5.0.2
 
       - name: Install deps
-        run: npm ci || npm i
+        run: npm i
+
+      # CI में CommonJS मोड फोर्स करें (पहले ESM/TS कॉन्फ्लिक्ट हुए थे)
+      - name: Force CommonJS (package.json + tsconfig)
+        run: |
+          node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));p.type='commonjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          sed -i 's/"module": *"NodeNext"/"module": "commonjs"/' tsconfig.json || true
+          sed -i 's/"moduleResolution": *"NodeNext"/"moduleResolution": "node"/' tsconfig.json || true
 
       - name: Compile
-        run: npx hardhat clean && npx hardhat compile
+        run: npx hardhat compile
 
       - name: Deploy to BSC Testnet
         env:
-          # Bash fallback ताकि GitHub expression में parsing error न आए
-          TREASURY_FALLBACK: "0x05A5bc620D55708776c8B52f38A3F5bf0b9DC420"
-          GUARDIAN_FALLBACK: "0xE77F94010Fb3B01431E18015A1c9A56F74e79998"
-        run: |
-          export TREASURY="${TREASURY:-$TREASURY_FALLBACK}"
-          export GUARDIAN="${GUARDIAN:-$GUARDIAN_FALLBACK}"
-          export USDT_ADDRESS_TESTNET="${USDT_ADDRESS_TESTNET:-}"
-          export USDT_DECIMALS_TESTNET=18
-          echo "Using TREASURY=$TREASURY  GUARDIAN=$GUARDIAN  USDT=$USDT_ADDRESS_TESTNET"
-          npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
+          # Hardhat deploy script envs already picked from job env
+          # (यहाँ दुबारा set करने की ज़रूरत नहीं है)
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npx hardhat run scripts/deploy_testnet.ts --network bscTestnet
