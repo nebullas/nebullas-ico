@@ -21,14 +21,15 @@ jobs:
     env:
       RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
       DEPLOYER_KEY:    ${{ secrets.DEPLOYER_KEY }}
-      FUND_TO:         ${{ github.event.inputs.address }}
-      USDT_AMOUNT:     ${{ github.event.inputs.usdtAmount }}
-      GAS_TIP:         ${{ github.event.inputs.gasTip }}
+      FUND_TO:         ${{ inputs.address }}
+      USDT_AMOUNT:     ${{ inputs.usdtAmount }}
+      GAS_TIP:         ${{ inputs.gasTip }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - name: Pin toolchain
+        with:
+          node-version: 22
+      - name: Pin toolchain (same as Deploy workflow)
         run: |
           npm pkg set devDependencies.hardhat=2.26.3
           npm pkg set devDependencies["@nomicfoundation/hardhat-toolbox"]=6.1.0
@@ -36,7 +37,9 @@ jobs:
           npm pkg set devDependencies.ts-node=10.9.1
           npm pkg set devDependencies["@types/node"]=20.11.30
           npm pkg set dependencies["@openzeppelin/contracts"]=5.0.2
-      - run: npm i
-      - run: npx hardhat compile
+      - name: Install deps
+        run: npm i
+      - name: Compile
+        run: npx hardhat compile
       - name: Fund + KYC
         run: npx hardhat run scripts/fund_and_kyc.ts --network bscTestnet

@@ -15,6 +15,7 @@ const REG_ABI = [
 async function main() {
   const to = process.env.FUND_TO as `0x${string}`;
   if (!to) throw new Error("FUND_TO is required");
+
   const usdtAmountStr = process.env.USDT_AMOUNT || "500"; // default 500 mUSDT
   const gasTipStr = process.env.GAS_TIP || "0.002";       // default 0.002 tBNB
 
@@ -23,17 +24,17 @@ async function main() {
   console.log("Deployer:", deployer.address);
   console.log("FUND_TO:", to);
 
-  // send a small tBNB tip for gas
+  // 1) small gas tip
   const tip = ethers.parseEther(gasTipStr);
   await (await deployer.sendTransaction({ to, value: tip })).wait();
   console.log("✓ sent tBNB tip:", gasTipStr);
 
-  // KYC pass
+  // 2) KYC mark
   const REG = new ethers.Contract(addrs.REG, REG_ABI, deployer);
   await (await REG.setKYC(to, true)).wait();
   console.log("✓ KYC marked true");
 
-  // transfer mUSDT
+  // 3) transfer mUSDT
   const USDT = new ethers.Contract(addrs.USDT, ERC20_ABI, deployer);
   const dec: number = await USDT.decimals();
   const amt = ethers.parseUnits(usdtAmountStr, dec);
